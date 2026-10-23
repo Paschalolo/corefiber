@@ -29,3 +29,5 @@
 
 1. **Stack Crafting & Trampolines:** Brand new fibers are initialized by manually crafting a stack layout that injects a jump target into `fiber_trampoline`, preventing illegal instruction faults on first execution.
 2. **Lock-Free Synchronization:** Employs explicit memory ordering semantics (`std::memory_order_acquire` / `release`) on atomic head/tail pointers to guarantee safe concurrent pushing and stealing without mutex contention.
+
+Lock-Free Ring Buffer with Slot Reservation (Dmitry Vyukov Pattern
