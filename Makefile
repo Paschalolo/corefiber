@@ -32,14 +32,6 @@ clean :
 object : $(MCFILE) $(HARGS)
 	$(COMPILE.c) -c  $< -o ./src/$(FILE).o
 
-special : 
-	@echo "Here we are"
-	@echo "wassup "
-oshared: $(MFILE) $(HARGS)
-	$(COMPILE.c) -fPIC -c  $< -o ./src/$(FILE).o
-
-doc:
-	texi2pdf doc/manual.texi -o doc/manual.pdf
 
 create: 
 	touch src/$(MCFILE)
