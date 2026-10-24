@@ -1,5 +1,5 @@
 .cache/
-
+tags
 *.json 
 bin/ 
 text/ 
