@@ -1,0 +1,78 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_OUTPUT_EXCMD	mixed	/number, pattern, mixed, or combineV2/
+!_TAG_OUTPUT_FILESEP	slash	/slash or backslash/
+!_TAG_OUTPUT_MODE	u-ctags	/u-ctags or e-ctags/
+!_TAG_PATTERN_LENGTH_LIMIT	96	/0 for no limit/
+!_TAG_PROC_CWD	/home/paschalolo/studyWeb/corefiber/	//
+!_TAG_PROGRAM_AUTHOR	Universal Ctags Team	//
+!_TAG_PROGRAM_NAME	Universal Ctags	/Derived from Exuberant Ctags/
+!_TAG_PROGRAM_URL	https://ctags.io/	/official site/
+!_TAG_PROGRAM_VERSION	5.9.0	//
+* **Zero-Dependency Core:** Written in modern C and raw assembly with no external runtime dependencies or heavy frameworks.	README.md	/^* **Zero-Dependency Core:** Written in modern C and raw assembly with no external runtime depend/;"	s	chapter:corefiber 🚀
+0	compile_commands.json	/^      "\/usr\/bin\/gcc-14",$/;"	s	array:0.arguments
+0	compile_commands.json	/^  {$/;"	o
+1	compile_commands.json	/^      "-c",$/;"	s	array:0.arguments
+10	compile_commands.json	/^      "-Wduplicated-branches",$/;"	s	array:0.arguments
+11	compile_commands.json	/^      "-Wlogical-op",$/;"	s	array:0.arguments
+12	compile_commands.json	/^      "-O3",$/;"	s	array:0.arguments
+13	compile_commands.json	/^      "-Wformat=2",$/;"	s	array:0.arguments
+14	compile_commands.json	/^      "-pthread",$/;"	s	array:0.arguments
+15	compile_commands.json	/^      "-mavx2",$/;"	s	array:0.arguments
+16	compile_commands.json	/^      "-march=native",$/;"	s	array:0.arguments
+17	compile_commands.json	/^      "-fno-exceptions",$/;"	s	array:0.arguments
+18	compile_commands.json	/^      "-I",$/;"	s	array:0.arguments
+19	compile_commands.json	/^      "includes",$/;"	s	array:0.arguments
+2	compile_commands.json	/^      "-Wall",$/;"	s	array:0.arguments
+20	compile_commands.json	/^      "-I",$/;"	s	array:0.arguments
+21	compile_commands.json	/^      "src",$/;"	s	array:0.arguments
+22	compile_commands.json	/^      "-std=c23",$/;"	s	array:0.arguments
+23	compile_commands.json	/^      "-o",$/;"	s	array:0.arguments
+24	compile_commands.json	/^      ".\/bin\/ch",$/;"	s	array:0.arguments
+25	compile_commands.json	/^      "src\/fiber.c"$/;"	s	array:0.arguments
+3	compile_commands.json	/^      "-Wextra",$/;"	s	array:0.arguments
+4	compile_commands.json	/^      "-Werror",$/;"	s	array:0.arguments
+5	compile_commands.json	/^      "-Wpedantic",$/;"	s	array:0.arguments
+6	compile_commands.json	/^      "-Wnull-dereference",$/;"	s	array:0.arguments
+7	compile_commands.json	/^      "-Wshadow",$/;"	s	array:0.arguments
+8	compile_commands.json	/^      "-mavx2",$/;"	s	array:0.arguments
+9	compile_commands.json	/^      "-Wconversion",$/;"	s	array:0.arguments
+Architectural Overview	README.md	/^## Architectural Overview$/;"	s	chapter:corefiber 🚀
+C23	Makefile	/^C23 = -std=c23$/;"	m
+CACHE_LINE	src/fiber.c	/^#define CACHE_LINE /;"	d	file:
+COMPILE.c	Makefile	/^COMPILE.c = $(GC) $(GCCFLAGS) $(INCLUDES) $(C23)$/;"	m
+COMPILE.cc	Makefile	/^COMPILE.cc = $(GCC) $(GCCFLAGS) $(INCLUDES) $(NORTT) $(CPP23)$/;"	m
+CPP23	Makefile	/^CPP23 = -std=c++23$/;"	m
+Core Performance Characteristics	README.md	/^## Core Performance Characteristics$/;"	s	chapter:corefiber 🚀
+FIB_ERRFAIL	src/fiber.c	/^constexpr int FIB_ERRFAIL = -1;$/;"	v	typeref:typename:constexpr int
+GCC	Makefile	/^GCC = g++-14$/;"	m
+GCCFLAGS	Makefile	/^GCCFLAGS = -Wall -Wextra -Werror -Wpedantic -Wnull-dereference  -Wshadow -mavx2 -Wconversion -Wd/;"	m
+HD_DESTRUCTIVE_INF_SZ	src/fiber.c	/^#define HD_DESTRUCTIVE_INF_SZ /;"	d	file:
+INCLUDES	Makefile	/^INCLUDES = -I includes -I src$/;"	m
+Key Engineering Features	README.md	/^### Key Engineering Features$/;"	S	section:corefiber 🚀""Architectural Overview
+Low-Level Mechanics	README.md	/^## Low-Level Mechanics$/;"	s	chapter:corefiber 🚀
+MCFILE	Makefile	/^MCFILE= $(FILE).c$/;"	m
+MFILE	Makefile	/^MFILE = $(FILE).cpp$/;"	m
+NORTT	Makefile	/^NORTT= -fno-rtti$/;"	m
+OBJS	Makefile	/^OBJS = $(wildcard $(OBJ_DIR)\/*.o)$/;"	m
+OBJ_DIR	Makefile	/^OBJ_DIR = src$/;"	m
+Reserv_ID	src/fiber.c	/^enum Reserv_ID{$/;"	g	file:
+SSL	Makefile	/^SSL = -lssl -lcrypto$/;"	m
+Scheduler	src/fiber.c	/^struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ)))Scheduler{$/;"	s	file:
+arguments	compile_commands.json	/^    "arguments": [$/;"	a	object:0
+clean	Makefile	/^clean : $/;"	t
+corefiber 🚀	README.md	/^# corefiber 🚀$/;"	c
+create	Makefile	/^create: $/;"	t
+createc	Makefile	/^createc: $/;"	t
+directory	compile_commands.json	/^    "directory": "\/home\/paschalolo\/studyWeb\/corefiber",$/;"	s	object:0
+fiber	src/fiber.c	/^struct __attribute__((aligned(64))) fiber {$/;"	s	file:
+file	compile_commands.json	/^    "file": "\/home\/paschalolo\/studyWeb\/corefiber\/src\/fiber.c",$/;"	s	object:0
+id	src/fiber.c	/^	size_t id ;$/;"	m	struct:scheduler_local	typeref:typename:size_t	file:
+main	src/fiber.c	/^int main(){$/;"	f	typeref:typename:int
+object	Makefile	/^object : $(MCFILE) $(HARGS)$/;"	t
+output	compile_commands.json	/^    "output": "\/home\/paschalolo\/studyWeb\/corefiber\/bin\/ch"$/;"	s	object:0
+push	Makefile	/^push : $/;"	t
+run	Makefile	/^run : $(MCFILE)$/;"	t
+run1	Makefile	/^run1 : $(MCFILE)$/;"	t
+runc	Makefile	/^runc : $(MFILE) $(HARGS)$/;"	t
+scheduler_local	src/fiber.c	/^struct scheduler_local{$/;"	s	file:
