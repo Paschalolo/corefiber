@@ -8,6 +8,8 @@
 #include <string.h> 
 #include <pthread.h> 
 #include <stdatomic.h>
+
+
 /* Error List*/ 
 [[maybe_unused]] constexpr int FIB_ERRFAIL = -1;
 /* Enum Definitions */
@@ -36,9 +38,13 @@ enum Fib_state_ID : uint8_t {
 /* Value of number of cores are set at compiile time to chnage this define your own */
 #define NO_OF_THREADS 4ULL
 #define NO_OF_HARVESTERS (NO_OF_THREADS -1ULL)
+#define STACK_SIZE_DEFAULT 64ULL * 1024ULL /* 64KB Default configuration */
+#define STACK_SIZE (STACK_SIZE_DEFAULT)
+
+
 /* Struct Defintions */ 
 
-/* thsi contains the resrvation tickets of threads that want to write to  a queue */
+/* this contains the resrvation tickets of threads that want to write to  a queue */
 struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) Reserv_write_tickets{
 	_Atomic(uint8_t) m_mask ; /* This holds the state of the reservation tickets */	
 	size_t m_position ;
@@ -79,7 +85,7 @@ struct x86_abi_func_registers{
  	size_t rdi , rsi , rdx , rcx , r8;	
 };
 struct __attribute__((aligned(CACHE_LINE)))fiber_data{
-	void* addr ; /* Adrress of function */
+	void*(*m_func_addr)(void*) ; /* Adrress of function */
 	struct x86_registers m_registers ;
 	size_t m_stack_position ; 
 	uint8_t m_mask ; /* This contains the state od teh function */
@@ -91,6 +97,7 @@ struct __attribute__((aligned(CACHE_LINE)))fiber_data{
 		_Atomic(uint8_t) m_mask ; \
 		alignas(_Alignof(DataType)) DataType m_data ;\
 	}
+
 
 struct mpsc_queue{
 
@@ -124,13 +131,21 @@ struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) fiber {
 };
 
 /* Function Declerations*/
-	
+int fiber_init(struct fiber* ); 
+int fiber_deinit(struct fiber*) ; 
+int fiber_switch(struct fiber_data* , struct fiber_data*) ; 
+int fiber_trampoline(struct fiber_data*);/* set up a fiber_data*/
 
-/* Core Functions */ 
-int fiber_switch() ; 
-int fiber_trampoline();
+/* schedulers */ 
+int scheduler_init(struct Scheduler* );
+int scheduler_deinit(struct Scheduler* );
+int scheduler_dst_write(struct Scheduler*);
+int scheduler_dst_steals(struct Scheduler*);
 
-
+int harvester_init(struct Harvester*); 
+int harvester_deinit(struct Harvester*);
+int harvest_functions(struct Harvester* ); 
+int __hv_fragmentation_internal_check(struct Harvester*); 
 /*Function defintions */
 
 
