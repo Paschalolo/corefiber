@@ -1,6 +1,7 @@
 
-
+#define _GNU_SOURCE
 #include <assert.h>
+#include <unistd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/mman.h>
@@ -8,7 +9,7 @@
 #include <string.h> 
 #include <pthread.h> 
 #include <stdatomic.h>
-
+#include <stdio.h>
 
 /* Error List*/ 
 [[maybe_unused]] constexpr int FIB_ERRFAIL = -1;
@@ -40,7 +41,9 @@ enum Fib_state_ID : uint8_t {
 #define NO_OF_HARVESTERS (NO_OF_THREADS -1ULL)
 #define STACK_SIZE_DEFAULT 64ULL * 1024ULL /* 64KB Default configuration */
 #define STACK_SIZE (STACK_SIZE_DEFAULT)
-
+#define QUEUE_SIZE 1024ULL 
+#define RESULT_QUEUE_SZ  (64ULL * QUEUE_SIZE ) 
+#define MASK_4KB (0xFFFULL)
 
 /* Struct Defintions */ 
 
@@ -87,7 +90,7 @@ struct x86_abi_func_registers{
 struct __attribute__((aligned(CACHE_LINE)))fiber_data{
 	void*(*m_func_addr)(void*) ; /* Adrress of function */
 	struct x86_registers m_registers ;
-	size_t m_stack_position ; 
+	size_t m_position ; 
 	uint8_t m_mask ; /* This contains the state od teh function */
 };
 
@@ -115,6 +118,8 @@ struct mpsc_queue{
 struct Harvester{
 	alignas(HD_DESTRUCTIVE_INF_SZ) unsigned char* m_stack ;
 	void* m_queue;
+	void* m_steal_queue ; 
+	void* m_write_queue ;
 	unsigned char* m_local_copy_buf ;
 	uint32_t write_idx ; 
 	uint32_t read_idx ; 
@@ -130,25 +135,108 @@ struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) fiber {
 	void* m_result_queues_ [NO_OF_HARVESTERS]; /* Addresses of Result Queues */ 
 };
 
+struct ls_t{/* launch scheduler function parameters */
+		struct Scheduler* m_schd;
+};
+
+
+struct lh_t { /* Launch harvester type*/
+	int m_core;
+	void* m_addr ;
+	void* m_steal_queue ; 
+	void* m_write_queue ;
+	void** m_result_queue;
+};
 /* Function Declerations*/
-int fiber_init(struct fiber* ); 
+
+void  fiber_init(struct fiber* ); 
 int fiber_deinit(struct fiber*) ; 
 int fiber_switch(struct fiber_data* , struct fiber_data*) ; 
 int fiber_trampoline(struct fiber_data*);/* set up a fiber_data*/
 
 /* schedulers */ 
+static void*  launch_scheduler(void*);
 int scheduler_init(struct Scheduler* );
 int scheduler_deinit(struct Scheduler* );
 int scheduler_dst_write(struct Scheduler*);
 int scheduler_dst_steals(struct Scheduler*);
 
+static void* launch_harvester(void* );
 int harvester_init(struct Harvester*); 
 int harvester_deinit(struct Harvester*);
 int harvest_functions(struct Harvester* ); 
-int __hv_fragmentation_internal_check(struct Harvester*); 
+static int __hv_fragmentation_internal_check(struct Harvester*); 
 /*Function defintions */
 
+__attribute__((noinline , cold)) void crash_fail(){
+	fprintf(stderr , "Error intilization ") ; 
+	_exit(1) ;
+}
 
+
+void  fiber_init(struct fiber* fib  ){
+	if(!fib){crash_fail();}	
+	for(size_t i = 0 ; i < NO_OF_HARVESTERS ; i++){
+		void* ptr ;
+		ptr  = mmap(NULL, QUEUE_SIZE * 128ULL, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+		if(ptr == MAP_FAILED){
+			crash_fail();
+		}
+		fib->m_queue[i] = ptr ;
+		ptr  = mmap(NULL , RESULT_QUEUE_SZ, PROT_READ| PROT_WRITE , MAP_ANONYMOUS | MAP_PRIVATE , 
+				-1 , 0);
+		if(ptr == MAP_FAILED ) {crash_fail();}
+		fib->m_result_queues_[i] = ptr ;
+	}
+
+	// Set up the scheduler 
+	pthread_t pid ;
+	int ret ;
+	pthread_attr_t attr ;
+	if( pthread_attr_init(&attr) < 0 ) {
+		crash_fail();
+	}
+	struct ls_t m_arg ;
+	m_arg.m_schd = &(fib->m_scheduler) ;  
+	ret =pthread_create(&pid, &attr,&launch_scheduler , (void*) &m_arg);
+	if(ret <= -1 ) {
+		crash_fail();
+	}
+
+	pthread_detach(pid);
+
+	// setting up HArvesters
+	struct lh_t m_arg2 ; 
+	for(size_t i = 1 ; i <= (size_t)NO_OF_HARVESTERS ; i++){
+		pid = 0 ;
+		m_arg2.m_core = (int)i;
+		m_arg2.m_addr = &(fib->m_queue[i -1 ]) ;
+		m_arg2.m_result_queue  =(void*) &(fib->m_result_queues_[i-1]);
+		m_arg2.m_steal_queue = (void*) &(fib->m_scheduler.m_steal_tickets[i-1]);
+		m_arg2.m_write_queue = (void*) &(fib->m_scheduler.m_write_tickets[i-1]);
+		ret =pthread_create(&pid , &attr , &launch_harvester , (void*)&m_arg2);
+		if(ret <0 ) crash_fail() ; 
+		pthread_detach(pid);
+	}
+
+}
+
+__attribute__((always_inline )) static void __scheduler_local_init(struct scheduler_local* lc , size_t id ){
+	lc->id = id; 
+	lc->m_steal = 0 ; 
+	lc->m_write = 0 ;
+}
+static void* launch_scheduler(void* arg){
+	if(!arg) return NULL;
+	const struct ls_t* args = (const struct  ls_t* ) arg ;
+	
+}
+static void* launch_harvester(void* arg){
+	if(!arg) return NULL ;
+}
+int scheduler_init(struct Scheduler* schd){
+	
+}
 int main(){
 
 	return 0;
