@@ -39,7 +39,7 @@ enum lh_mask : uint8_t{
 
 /* Value of number of cores are set at compiile time to chnage this define your own */
 #define NO_OF_THREADS 4ULL
-#define NO_OF_HARVESTERS (NO_OF_THREADS -1ULL)
+#define NO_OF_HARVESTERS (4ULL)
 
 /* NOTE : stack configuration can only get as big as 4GB*/
 #define STACK_SIZE_DEFAULT 64ULL * 1024ULL /* 64KB Default configuration */
