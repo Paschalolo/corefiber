@@ -1,4 +1,5 @@
 
+#include <sys/types.h>
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>
@@ -48,7 +49,8 @@ enum Fib_state_ID : uint8_t {
 #define LOCAL_BUF_MAX_CNT 100ULL 
 #define LOCAL_BUF_SZ (LOCAL_BUF_MAX_CNT * 128ULL) 
 #define MASK_4KB (0xFFFULL)
-
+#define MASK_63BIT_L (0x8000000000000000ULL)
+#define MASK_63BIT (~MASK_63BIT_L) 
 /* Struct Defintions */ 
 
 /* this contains the resrvation tickets of threads that want to write to  a queue */
@@ -174,6 +176,16 @@ int harvester_deinit(struct Harvester*);
 int harvest_functions(struct Harvester* ); 
 static int __hv_fragmentation_internal_check(struct Harvester*); 
 /*Function defintions */
+
+//------------------------------------------------
+// HELPER FUNCTIONS 
+
+__attribute__((always_inline)) static inline  bool extract_bit_inaddr(uint64_t addr){
+	return (uint8_t)(((addr) & MASK_63BIT_L) >> 63ULL);
+}	
+__attribute__((always_inline)) static inline void*  swap_bit_inaddr(uint64_t addr){
+	return  (void*)(((addr) ^ MASK_63BIT_L )  | ((addr) & MASK_63BIT)) ;
+}
 
 __attribute__((noinline , cold)) void crash_fail(){
 	fprintf(stderr , "Error intilization ") ; 
@@ -331,7 +343,9 @@ static void* launch_harvester(void* arg){
 
 	while(true){}	
 	return NULL ;
-}	
+}
+
+
 int main(){
 
 	return 0;
