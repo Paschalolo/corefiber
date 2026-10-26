@@ -68,10 +68,22 @@ struct __attribute__((aligned(CACHE_LINE)))scheduler_local{
 	size_t m_steal ;
 
 };
+struct mpsc_queue{
+
+	/* Head written to by the scheduler 
+	 * NOTE : DUE to the large amoutn of producer this will cause great contention on the head_ atomic value and will sat		urate the buss local copy will be kept but also only the scheduler after collation of result from the producer cores w		ill write to this varaible 
+	 */ 
+	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_head_  ;
+
+	/* tail is consume and gooubled up by the consumer*/
+	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_tail_ ;
+};
+
 struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ)))Scheduler{
 	alignas(HD_DESTRUCTIVE_INF_SZ) struct Reserv_steal_tickets m_steal_tickets [NO_OF_HARVESTERS] ;  
 	alignas(HD_DESTRUCTIVE_INF_SZ) struct Reserv_write_tickets m_write_tickets[NO_OF_HARVESTERS];
 	// Scheduler Local data 
+	struct mpsc_queue m_que_info[NO_OF_HARVESTERS];
 	struct scheduler_local m_local_data;	
 
 };
@@ -108,21 +120,11 @@ struct __attribute__((aligned(CACHE_LINE)))fiber_data{
 	}
 
 
-struct mpsc_queue{
-
-	/* Head written to by the scheduler 
-	 * NOTE : DUE to the large amoutn of producer this will cause great contention on the head_ atomic value and will sat		urate the buss local copy will be kept but also only the scheduler after collation of result from the producer cores w		ill write to this varaible 
-	 */ 
-	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_head_;
-
-	/* tail is consume and gooubled up by the consumer*/
-	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_tail_;
-};
-
 
 /* Harvester contains data of the cores that acts as consumers */
 struct Harvester{
 	alignas(HD_DESTRUCTIVE_INF_SZ) unsigned char* m_stack ;
+	struct mpsc_queue* m_queue_info ;
 	void* m_queue;
 	void* m_steal_queue ; 
 	void* m_write_queue ;
@@ -136,7 +138,7 @@ struct Harvester{
 
 /*Fiber */
 struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) fiber {
-	struct Scheduler m_scheduler ; 
+	struct Scheduler m_scheduler ;
 	void* m_queue[NO_OF_HARVESTERS];/* Addrresses of all the queues*/
 	void* m_result_queues_ [NO_OF_HARVESTERS]; /* Addresses of Result Queues */ 
 };
@@ -152,6 +154,7 @@ struct lh_t { /* Launch harvester type*/
 	void* m_steal_queue ; 
 	void* m_write_queue ;
 	void* m_result_queue;
+	struct mpsc_queue* m_info ;
 };
 /* Function Declerations*/
 
@@ -162,13 +165,11 @@ int fiber_trampoline(struct fiber_data*);/* set up a fiber_data*/
 
 /* schedulers */ 
 static void*  launch_scheduler(void*);
-int scheduler_init(struct Scheduler* );
 int scheduler_deinit(struct Scheduler* );
 int scheduler_dst_write(struct Scheduler*);
 int scheduler_dst_steals(struct Scheduler*);
 
 static void* launch_harvester(void* );
-int harvester_init(struct Harvester*); 
 int harvester_deinit(struct Harvester*);
 int harvest_functions(struct Harvester* ); 
 static int __hv_fragmentation_internal_check(struct Harvester*); 
@@ -186,6 +187,7 @@ __attribute__((noinline , cold)) void crash_fail_cpu(){
 }
 void  fiber_init(struct fiber* fib  ){
 	if(!fib){crash_fail();}
+	
 	// Set up quueus and result queuue memory space 
 	for(size_t i = 0 ; i < NO_OF_HARVESTERS ; i++){
 		void* ptr ;
@@ -229,6 +231,7 @@ void  fiber_init(struct fiber* fib  ){
 		m_arg2.m_result_queue  =(fib->m_result_queues_[i-1]);
 		m_arg2.m_steal_queue = (void*) &(fib->m_scheduler.m_steal_tickets[i-1]);
 		m_arg2.m_write_queue = (void*) &(fib->m_scheduler.m_write_tickets[i-1]);
+		m_arg2.m_info = &(fib->m_scheduler.m_que_info[i-1]);
 		ret =pthread_create(&pid , &attr2 , &launch_harvester , (void*)&m_arg2);
 		if(ret <0 ) crash_fail() ; 
 		pthread_detach(pid);
@@ -260,6 +263,11 @@ static void* launch_scheduler(void* arg){
 	const struct ls_t* args = (const struct  ls_t* ) arg ;
 	memset((args->m_schd->m_steal_tickets),0x00, sizeof(struct Reserv_steal_tickets));
 	memset((args->m_schd->m_write_tickets),0x00, sizeof(struct Reserv_write_tickets));
+	for(size_t i = 0 ; i < NO_OF_HARVESTERS ; i++){
+
+		atomic_store_explicit(&(args->m_schd->m_que_info[i].m_head_), 0 , memory_order_release) ;
+		atomic_store_explicit(&(args->m_schd->m_que_info[i].m_tail_), 0 , memory_order_release) ;
+	}
 	__scheduler_local_init(&(args->m_schd->m_local_data),0 );
 	// start scheduler loop
 	while(true){}
@@ -295,20 +303,24 @@ static void* launch_harvester(void* arg){
 	if(ret == -1){
 		crash_fail();
 	}
-	/* set up local_buf*/
 	// lock memery
 	ret = mlock(args->m_addr , QUEUE_SIZE);
 	if(ret == -1){
 		crash_fail();
 	}
 	// set up local stack 
-
+	
 	local_harvester.m_queue = args->m_addr ; 
 	local_harvester.m_steal_queue = args->m_steal_queue ; 
 	local_harvester.m_write_queue = args->m_write_queue ; 
-
+	local_harvester.m_queue_info = args->m_info ;
 	/*Set up local copy buffer */
-	local_harvester.m_local_copy_buf = NULL; 
+	ptr = mmap(NULL ,LOCAL_BUF_SZ , PROT_READ| PROT_WRITE , MAP_ANONYMOUS | MAP_PRIVATE , -1 , 0 );
+	if(ptr == MAP_FAILED) {
+		crash_fail();
+	}
+	if(ptr == MAP_FAILED){crash_fail();}
+	local_harvester.m_local_copy_buf = ptr; 
 	
 	local_harvester.write_idx = 0 ; 
 	local_harvester.read_idx = 0 ; 
@@ -320,9 +332,6 @@ static void* launch_harvester(void* arg){
 	while(true){}	
 	return NULL ;
 }	
-int scheduler_init(struct Scheduler* schd){
-	
-}
 int main(){
 
 	return 0;
