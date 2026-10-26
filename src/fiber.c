@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>
+#include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/mman.h>
@@ -10,7 +11,7 @@
 #include <pthread.h> 
 #include <stdatomic.h>
 #include <stdio.h>
-
+#include <stdlib.h>
 /* Error List*/ 
 [[maybe_unused]] constexpr int FIB_ERRFAIL = -1;
 /* Enum Definitions */
@@ -41,8 +42,11 @@ enum Fib_state_ID : uint8_t {
 #define NO_OF_HARVESTERS (NO_OF_THREADS -1ULL)
 #define STACK_SIZE_DEFAULT 64ULL * 1024ULL /* 64KB Default configuration */
 #define STACK_SIZE (STACK_SIZE_DEFAULT)
-#define QUEUE_SIZE 1024ULL 
-#define RESULT_QUEUE_SZ  (64ULL * QUEUE_SIZE ) 
+#define QUEUE_NO 1024ULL
+#define QUEUE_SIZE (QUEUE_NO * 128ULL)
+#define RESULT_QUEUE_SZ  (64ULL * QUEUE_SIZE )
+#define LOCAL_BUF_MAX_CNT 100ULL 
+#define LOCAL_BUF_SZ (LOCAL_BUF_MAX_CNT * 128ULL) 
 #define MASK_4KB (0xFFFULL)
 
 /* Struct Defintions */ 
@@ -87,6 +91,8 @@ struct x86_registers {
 struct x86_abi_func_registers{
  	size_t rdi , rsi , rdx , rcx , r8;	
 };
+
+
 struct __attribute__((aligned(CACHE_LINE)))fiber_data{
 	void*(*m_func_addr)(void*) ; /* Adrress of function */
 	struct x86_registers m_registers ;
@@ -141,11 +147,11 @@ struct ls_t{/* launch scheduler function parameters */
 
 
 struct lh_t { /* Launch harvester type*/
-	int m_core;
+	uint16_t m_core;
 	void* m_addr ;
 	void* m_steal_queue ; 
 	void* m_write_queue ;
-	void** m_result_queue;
+	void* m_result_queue;
 };
 /* Function Declerations*/
 
@@ -174,11 +180,16 @@ __attribute__((noinline , cold)) void crash_fail(){
 }
 
 
+__attribute__((noinline , cold)) void crash_fail_cpu(){
+	fprintf(stderr , "Failed to lock cpu : sorry  ") ; 
+	_exit(1) ;
+}
 void  fiber_init(struct fiber* fib  ){
-	if(!fib){crash_fail();}	
+	if(!fib){crash_fail();}
+	// Set up quueus and result queuue memory space 
 	for(size_t i = 0 ; i < NO_OF_HARVESTERS ; i++){
 		void* ptr ;
-		ptr  = mmap(NULL, QUEUE_SIZE * 128ULL, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+		ptr  = mmap(NULL, QUEUE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 		if(ptr == MAP_FAILED){
 			crash_fail();
 		}
@@ -193,6 +204,7 @@ void  fiber_init(struct fiber* fib  ){
 	pthread_t pid ;
 	int ret ;
 	pthread_attr_t attr ;
+	pthread_attr_t attr2 ;
 	if( pthread_attr_init(&attr) < 0 ) {
 		crash_fail();
 	}
@@ -208,13 +220,16 @@ void  fiber_init(struct fiber* fib  ){
 	// setting up HArvesters
 	struct lh_t m_arg2 ; 
 	for(size_t i = 1 ; i <= (size_t)NO_OF_HARVESTERS ; i++){
+		if( pthread_attr_init(&attr2) < 0 ) {
+		crash_fail();
+		}
 		pid = 0 ;
-		m_arg2.m_core = (int)i;
-		m_arg2.m_addr = &(fib->m_queue[i -1 ]) ;
-		m_arg2.m_result_queue  =(void*) &(fib->m_result_queues_[i-1]);
+		m_arg2.m_core = (uint16_t)i;
+		m_arg2.m_addr = &(fib->m_queue[i - 1 ]) ;
+		m_arg2.m_result_queue  =(fib->m_result_queues_[i-1]);
 		m_arg2.m_steal_queue = (void*) &(fib->m_scheduler.m_steal_tickets[i-1]);
 		m_arg2.m_write_queue = (void*) &(fib->m_scheduler.m_write_tickets[i-1]);
-		ret =pthread_create(&pid , &attr , &launch_harvester , (void*)&m_arg2);
+		ret =pthread_create(&pid , &attr2 , &launch_harvester , (void*)&m_arg2);
 		if(ret <0 ) crash_fail() ; 
 		pthread_detach(pid);
 	}
@@ -227,13 +242,84 @@ __attribute__((always_inline )) static void __scheduler_local_init(struct schedu
 	lc->m_write = 0 ;
 }
 static void* launch_scheduler(void* arg){
+	// lock core 
+	int ret ;
+	cpu_set_t cpu_set ;
+	CPU_ZERO(&cpu_set); 
+	
+	CPU_SET(0, &cpu_set);
+	pthread_t pid = pthread_self();
+	// lock core
+	ret =  pthread_setaffinity_np(pid , sizeof(cpu_set_t) , &cpu_set);
+
+	if(ret != 0 ){
+		crash_fail_cpu();	
+	}
+	// locak memeory 
 	if(!arg) return NULL;
 	const struct ls_t* args = (const struct  ls_t* ) arg ;
+	memset((args->m_schd->m_steal_tickets),0x00, sizeof(struct Reserv_steal_tickets));
+	memset((args->m_schd->m_write_tickets),0x00, sizeof(struct Reserv_write_tickets));
+	__scheduler_local_init(&(args->m_schd->m_local_data),0 );
+	// start scheduler loop
+	while(true){}
+	return NULL ;
 	
 }
+
 static void* launch_harvester(void* arg){
 	if(!arg) return NULL ;
-}
+	struct Harvester local_harvester ;
+	auto args = (struct lh_t*)arg;
+	int ret ;
+	cpu_set_t cpu_set ;
+	CPU_ZERO(&cpu_set); 
+	
+	CPU_SET(args->m_core, &cpu_set);
+	pthread_t pid = pthread_self();
+	// lock core
+	ret =  pthread_setaffinity_np(pid , sizeof(cpu_set_t) , &cpu_set);
+
+	if(ret != 0 ){
+		crash_fail_cpu();	
+	}
+
+	/*set up stack */ 
+	/* stack default to 64KB*/
+	auto ptr = mmap(NULL , STACK_SIZE , PROT_READ| PROT_WRITE , MAP_ANONYMOUS | MAP_PRIVATE , -1 , 0 );
+	if(ptr == MAP_FAILED) {
+		crash_fail();
+	}
+	local_harvester.m_stack = ptr ;
+	ret = mlock(ptr , STACK_SIZE);
+	if(ret == -1){
+		crash_fail();
+	}
+	/* set up local_buf*/
+	// lock memery
+	ret = mlock(args->m_addr , QUEUE_SIZE);
+	if(ret == -1){
+		crash_fail();
+	}
+	// set up local stack 
+
+	local_harvester.m_queue = args->m_addr ; 
+	local_harvester.m_steal_queue = args->m_steal_queue ; 
+	local_harvester.m_write_queue = args->m_write_queue ; 
+
+	/*Set up local copy buffer */
+	local_harvester.m_local_copy_buf = NULL; 
+	
+	local_harvester.write_idx = 0 ; 
+	local_harvester.read_idx = 0 ; 
+	local_harvester.rem_idx = 0 ; 
+
+	local_harvester.m_id = args->m_core ;
+	local_harvester.m_result_queue = args->m_result_queue;
+
+	while(true){}	
+	return NULL ;
+}	
 int scheduler_init(struct Scheduler* schd){
 	
 }
