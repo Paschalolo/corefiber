@@ -1,0 +1,64 @@
+# Technical Specification: High-Performance Decentralized C-Fiber Runtime (`corefiber`)
+
+This document outlines the end-to-end architectural blueprint for your high-throughput, low-latency C-based fiber scheduling engine. The runtime is engineered around first-principles mechanical sympathy: eliminating central bottlenecks, maximizing cache-line efficiency, and leveraging decentralized work-stealing to saturate physical CPU cores.
+
+---
+
+## 1. Thread-Per-Core Topology & Execution Model
+
+* **Zero Wasted Cores:** There is no dedicated "scheduler thread." Every physical core runs an autonomous worker thread (harvester) executing computation and scheduling loops concurrently.
+* **Shard Isolation:** Each worker owns a private, locally managed execution queue. Inter-core synchronization is minimized by keeping normal operations strictly localized to the worker's cache domain.
+
+---
+
+## 2. Producer Ingestion & Stack-Local Batching API
+
+To avoid traditional Thread-Local Storage (TLS) penalties (such as GOT/PLT indirection and dynamic loader locks) when compiled as a dynamic library (`.so`/`.dll`), ingestion relies on explicit stack-allocated batch handles.
+
+* **Local Accumulation:** Producers append tasks to a stack-local staging buffer (e.g., size 32) using an explicit C API.
+* **Transparent Throttling:** The staging buffer automatically flushes when its capacity is reached, or via an explicit manual flush when work packets conclude.
+* **The `memcpy` Trade-off:** Staging locally and flushing in bulk via `memcpy` trades a negligible, high-speed L1 cache copy for the absolute elimination of atomic bus contention on the shared queue.
+
+```c
+#define BATCH_SIZE 32
+
+typedef struct {
+    void (*fn)(void* arg);
+    void* arg;
+} FiberTask;
+
+typedef struct {
+    FiberTask buffer[BATCH_SIZE];
+    size_t count;
+    void* shared_queue_target;
+} FiberBatcher;
+
+void fiber_batcher_init(FiberBatcher* batcher, void* shared_queue);
+void fiber_batcher_add(FiberBatcher* batcher, void (*fn)(void*), void* arg);
+void fiber_batcher_flush(FiberBatcher* batcher);
+
+```
+
+---
+
+## 3. Sharded MPSC Ring Buffer & Dual-Tail Commit Mechanics
+
+Because multiple external producers can drop batches into a worker's queue concurrently, the queue operates as a sharded Multiple-Producer, Single-Consumer (MPSC) batch ring buffer protected by a **Dual-Tail Commit Pattern**.
+
+1. **Reservation (`tail`):** Producers claim a contiguous block of slots instantly using an atomic `fetch_add` on the reservation tail. This requires zero waiting for other cores.
+2. **Bulk Write:** The producer performs a direct `memcpy` of its staged batch into the pre-allocated memory slots.
+3. **Commit (`commit_tail`):** Once copying completes, the producer updates the `commit_tail` using an atomic store-release (`std::memory_order_release`).
+4. **Consumer Safety:** The harvester worker only reads up to `commit_tail`. This completely prevents head-of-line stalls and out-of-order memory visibility bugs without requiring expensive per-slot atomic state flags.
+
+---
+
+## 4. Decentralized Work-Stealing & Thundering Herd Defense
+
+To handle asymmetric loads where producers flood certain workers while others go idle, the engine uses a completely decentralized load-balancing mechanism:
+
+* **No Central Coordinator:** Workers pull from their own local queues first. When starved, they initiate work-stealing independently.
+* **Randomized Victim Selection:** To prevent the "thundering herd" effect (where multiple idle cores hammer Worker 0 simultaneously), workers use a fast thread-local Xorshift PRNG to randomly select victim queues (`victim_id = xorshift() % worker_count`).
+* **Non-Blocking CAS Stealing:** Thieves use non-blocking Compare-And-Swap (CAS) operations to atomically claim half a batch from a victim's tail, immediately backing off and retrying elsewhere on failure.
+* **Hardware Relaxation:** Unsuccessful steal cycles execute CPU pause instructions (`_mm_pause()`) to relax execution pipelines and conserve power.
+
+---
