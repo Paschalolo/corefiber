@@ -109,6 +109,8 @@ struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) Harvester{
 	struct mpsc_queue* m_queue_info;
 	/* m_local_buf uased when to free up spacer during colleasing */
 	unsigned char* m_local_copy_buf ;
+	/* m_queue_info_global*/
+	/* mqueu _addr _global for work stealing*/
 	unsigned char* m_stack ; /* local stack to the harvester */
 	size_t m_stack_pos; 
 	void* m_queue;
@@ -355,6 +357,7 @@ int hrvst_functions(struct Harvester* hrv){
 		__hrvst_fill_local_harvester_queue();
 		// possible return -1
 	}
+	auto queue_ptr =  
 	auto tail = hrv->m_tail_idx;
 	auto stack_ptr = hrv->m_stack;
 	auto stk_pos = hrv->m_stack_pos ;
