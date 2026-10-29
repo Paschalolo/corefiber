@@ -26,12 +26,16 @@ enum Fib_state_ID : uint8_t {
 	FIBST_YIELDING,
 	FIBST_FINSHED 
 };
+enum Res_Mask : uint8_t{
+	RES_NOT_READY = 0x00 , 
+	RES_IS_READY = 0x01,
+};
 
-
-enum lh_mask : uint8_t{
+/* enum lh_mask : uint8_t{
 	LH_WAITING  = 0x00, 
 	LH_READY = 0x01
-};
+};*/
+
 /* NEEDED TEMPLATE MACROS*/
 
 #define CACHE_LINE 64ULL
@@ -46,8 +50,8 @@ enum lh_mask : uint8_t{
 #define STACK_SIZE (STACK_SIZE_DEFAULT)
 #define QUEUE_NO 1024ULL
 #define QUEUE_SIZE (QUEUE_NO * 128ULL)
-#define RESULT_QUEUE_SZ  (64ULL * QUEUE_SIZE )
-#define LOCAL_BUF_MAX_CNT 100ULL 
+
+#define LOCAL_BUF_MAX_CNT 20ULL 
 #define LOCAL_BUF_SZ (LOCAL_BUF_MAX_CNT * 128ULL) 
 #define MASK_4KB (0xFFFULL)
 #define MASK_63BIT_L (0x8000000000000000ULL)
@@ -63,6 +67,8 @@ struct mpsc_queue{
 
 	/* tail is consume and gooubled up by the consumer*/
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_tail_ ;
+
+	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_commit_tail_ ;
 };
 
 /* This saves calle saved non volatile registers for the x86 Architecture and the OS ABI function rdi needed for the first argumnent  */
@@ -92,9 +98,9 @@ struct ResultPayload{
 struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ)))fiber_data{
 		void*(*m_func_addr)(void*) ; /* Adrress of function */
 		struct x86_registers m_registers ;
+		void* m_result ;
 		uint32_t m_stack_position;
 		uint8_t m_mask ; /* This contains the state of the function */
-		void* m_result ;
 	};
 static_assert(sizeof(struct fiber_data) == 128ULL , "size of fiber data is not 128");
 
@@ -107,13 +113,10 @@ static_assert(sizeof(struct fiber_data) == 128ULL , "size of fiber data is not 1
 struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) Harvester{
 	// Local section of harvester only available to the Harvester 
 	struct mpsc_queue* m_queue_info;
-	/* m_local_buf uased when to free up spacer during colleasing */
-	unsigned char* m_local_copy_buf ;
-	/* m_queue_info_global*/
-	/* mqueu _addr _global for work stealing*/
 	unsigned char* m_stack ; /* local stack to the harvester */
 	size_t m_stack_pos; 
 	void* m_queue;
+
 	uint32_t m_tail_idx ;
 	uint32_t m_head_idx ; 
 	uint32_t m_tail_rem_idx ;
@@ -132,11 +135,12 @@ struct __attribute__((aligned(HD_DESTRUCTIVE_INF_SZ))) fiber {
 struct __attribute__((aligned(CACHE_LINE))) fiber_client_local{
 	void** m_addr; /* The address of the queue it is accesing */
 	struct mpsc_queue** mqueue_info ;/* the global synchronization place */
+	void* m_local_copy_buf ;
 	size_t  m_current_id ;
 	uint32_t m_tail_idx ;
 	uint32_t m_head_idx ; 
-	uint32_t m_head_rem_idx ;
-
+	uint32_t m_internal_buf_cnt ;
+	uint8_t m_mask ;
 };
 
 struct __attribute__((aligned(CACHE_LINE)))lh_t { /* Launch harvester type*/
@@ -145,18 +149,24 @@ struct __attribute__((aligned(CACHE_LINE)))lh_t { /* Launch harvester type*/
 	uint16_t m_core ;
 	pthread_t * m_pids;
 };
+
+
 /* Function Declerations*/
 
 void  fiber_init(struct fiber* ); 
 int fiber_deinit(struct fiber*) ;
 int fiber_switch(struct fiber_data* , struct fiber_data*) ; 
-
+int fiber_yield();
 /* FIber client*/
 int fiber_client_init(struct fiber* , struct fiber_client_local*);
-
+int fiber_client_flush(struct fiber_client_local* client);
 /* Function to set up a fiber data */
 int fiber_client_trampoline( struct fiber_client_local* , void*(*func)(void*) ,void* arg ,  struct ResultPayload* result_ptr );
 
+/* This is a blocking operation and will block till the result is ready
+ * it is adviced to sue a void function return on a fucntion to aviod blocking 
+ * */ 
+int fiber_result_join(struct ResultPayload* res);
 static void* launch_harvester(void* );
 void  hrvst_deinit(int);
 int hrvst_functions(struct Harvester* ); 
@@ -183,10 +193,14 @@ __attribute__((noinline , cold)) void crash_fail_cpu(){
 	_exit(1) ;
 }
 
+// random functions 
+size_t xorshift();
 
 /*Function defintions */
+/* RANDOM FUNCTION */
 
 
+/* FIBER FUNCTIONS */ 
 void  fiber_init(struct fiber* fib  ){
 	if(!fib){crash_fail();}
 	
@@ -247,30 +261,42 @@ int fiber_client_init(struct fiber* fib, struct fiber_client_local* local  ){
 	local->mqueue_info = fib->m_queue_info;
 	local->m_head_idx = 0 ; 
 	local->m_tail_idx = 0 ;
-	local->m_head_rem_idx = 0 ;
+	local->m_internal_buf_cnt = 0 ;
 	return 0;
 }
-int __fiber__get_local_queue_synchronization_();
+__attribute__((noinline)) int __fiber__flush_and_get_local_queue_synchronization_(struct fiber_client_local* loc){
+	fiber_client_flush();	
+	return 0;
+}
 
+int fiber_client_flush(struct fiber_client_local* client ){
+	auto count = client->m_internal_buf_cnt;
+	auto rand_id /* we get a random victim selector to distrubute the data*/= xorshift() % NO_OF_HARVESTERS;
+	void* queue_buf = client->m_addr[rand_id] ;
+	struct mpsc_queue* queue_info_ptr = client->mqueue_info[rand_id];
+	memcpy(dest , src , count);
+	client->m_internal_buf_cnt = 0 ;
+}
 
-int fiber_client_add( struct fiber_client_local* local  , void*(*func)(void*) , void* arg , struct ResultPayload* result_ptr ){
+int fiber_client_trampoline( struct fiber_client_local* local  , void*(*func)(void*) , void* arg , struct ResultPayload* result_ptr ){
 	if(!local)return -1;
-	if(local->m_head_rem_idx == 0 ){
-		__fiber__get_local_queue_synchronization_();
+	uint32_t pos_int_buf = local->m_internal_buf_cnt;
+	struct fiber_data* local_buf_ptr = (struct fiber_data*)local->m_local_copy_buf ;
+	if(pos_int_buf == LOCAL_BUF_MAX_CNT ){
+		__fiber__flush_and_get_local_queue_synchronization_(local);
 	}
-	auto id = local->m_current_id ;
-	auto ptr = (struct fiber_data*)(local->m_addr[id]) ;
-	auto head_idx = local->m_head_idx;
-	ptr[head_idx].m_func_addr = func ;
-	ptr[head_idx].m_registers.rdi = (size_t)arg ;
-	ptr[head_idx].m_result = (void*) result_ptr;
-	atomic_store_explicit(&(result_ptr->m_mask) , FIBST_INQUEUE,memory_order_release);
-	local->m_head_idx++;
-
-	local->m_head_rem_idx--;
+	local_buf_ptr[pos_int_buf].m_func_addr = func ; 
+	local_buf_ptr[pos_int_buf].m_registers.rdi = (size_t) arg;
+	local_buf_ptr[pos_int_buf].m_result = (void*) result_ptr;
+	local_buf_ptr[pos_int_buf].m_mask = FIBST_INQUEUE ;
+	local->m_internal_buf_cnt++;
 	return 0;
 }
 
+int fiber_result_join(struct ResultPayload* res){
+	uint8_t mask = atomic_load_explicit(&(res->m_mask) , memory_order_relaxed);
+	return (mask == RES_IS_READY);  
+}
 
 static thread_local struct Harvester* ptr_local_harvester;
 static void* launch_harvester(void* arg){
