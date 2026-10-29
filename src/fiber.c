@@ -64,6 +64,7 @@ struct mpsc_queue{
 	 * NOTE : DUE to the large amoutn of producer this will cause great contention on the head_ atomic value and will sat		urate the buss local copy will be kept but also only the scheduler after collation of result from the producer cores w		ill write to this varaible 
 	 */ 
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_head_  ;
+	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_commit_head_  ;
 
 	/* tail is consume and gooubled up by the consumer*/
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_tail_ ;
@@ -265,17 +266,21 @@ int fiber_client_init(struct fiber* fib, struct fiber_client_local* local  ){
 	return 0;
 }
 __attribute__((noinline)) int __fiber__flush_and_get_local_queue_synchronization_(struct fiber_client_local* loc){
-	fiber_client_flush();	
+	fiber_client_flush(loc);	
 	return 0;
 }
 
 int fiber_client_flush(struct fiber_client_local* client ){
 	auto count = client->m_internal_buf_cnt;
 	auto rand_id /* we get a random victim selector to distrubute the data*/= xorshift() % NO_OF_HARVESTERS;
-	void* queue_buf = client->m_addr[rand_id] ;
+	struct fiber_data* queue_buf = (struct fiber_data*)client->m_addr[rand_id] ;
 	struct mpsc_queue* queue_info_ptr = client->mqueue_info[rand_id];
-	memcpy(dest , src , count);
+	auto pos_ = atomic_fetch_add_explicit(&(queue_info_ptr[rand_id].m_head_) ,count , memory_order_release);
+	// handle edge case if size is greater than buffer space left
+	memcpy((void*)&(queue_buf[pos_]) , (void*)(client->m_local_copy_buf) , sizeof(struct fiber_data) );
+	atomic_fetch_add_explicit(&(queue_info_ptr[rand_id].m_commit_head_) ,count , memory_order_release);
 	client->m_internal_buf_cnt = 0 ;
+	return 0;
 }
 
 int fiber_client_trampoline( struct fiber_client_local* local  , void*(*func)(void*) , void* arg , struct ResultPayload* result_ptr ){
