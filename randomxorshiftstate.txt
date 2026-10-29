@@ -1,0 +1,75 @@
+Here is a highly efficient implementation of xorshift128 and xorshift128+ in C, which is the standard choice for low-level systems and game engines.
+The xorshift128+ variant is included because pure xorshift128 fails certain statistical tests (like BigCrush) in its lower bits. Adding a simple addition scramble fixes this vulnerability while maintaining raw performance.
+c
+#include <stdint.h>
+#include <stdio.h>
+
+// The 128-bit internal state must be initialized to a non-zero seed.
+typedef struct {
+    uint64_t high; // Consists of two 32-bit words or one 64-bit word depending on variant
+    uint64_t low;
+} xorshift128_state_t;
+
+// Alternatively, represented as four 32-bit variables: x, y, z, w
+typedef struct {
+    uint32_t x;
+    uint32_t y;
+    uint32_t z;
+    uint32_t w;
+} xorshift32_x4_state_t;
+
+/* 
+ * Standard 32-bit word xorshift128
+ * Period: 2^128 - 1
+ */
+uint32_t xorshift128(xorshift32_x4_state_t *state) {
+    uint32_t t = state->x ^ (state->x << 11);
+    
+    // Shift the state window
+    state->x = state->y;
+    state->y = state->z;
+    state->z = state->w;
+    
+    // Generate the next state element using the constants (8, 19, 11)
+    state->w = state->w ^ (state->w >> 19) ^ t ^ (t >> 8);
+    
+    return state->w;
+}
+
+/*
+ * Modern 64-bit xorshift128+ 
+ * Period: 2^128 - 1
+ * Statistically superior for low-level systems (used in V8 / JavaScript engines previously).
+ */
+uint64_t xorshift128plus(xorshift128_state_t *state) {
+    uint64_t s1 = state->high;
+    const uint64_t s0 = state->low;
+    
+    // Scrambler: Addition hides the linear properties of xorshift
+    const uint64_t result = s1 + s0;
+    
+    state->high = s0;
+    s1 ^= s1 << 23; // a
+    state->low = s1 ^ s0 ^ (s1 >> 18) ^ (s0 >> 5); // b, c
+    
+    return result;
+}
+
+int main(void) {
+    // Initialization: The state MUST NOT be completely filled with zeros
+    xorshift32_x4_state_t state32 = { 123456789, 362436069, 521288629, 88675123 };
+    xorshift128_state_t state64 = { 0x123456789ABCDEFULL, 0xFEDCBA987654321ULL };
+
+    printf("Pure 32-bit xorshift128 output: %u\n", xorshift128(&state32));
+    printf("Scrambled 64-bit xorshift128+ output: %lu\n", xorshift128plus(&state64));
+
+    return 0;
+}
+Use code with caution.
+
+Key Properties of this Code
+
+• Zero Memory Allocations: The generator operates purely in-place on the referenced state structure, making it ideal for hot paths or kernel/user-space driver boundaries.
+• Instruction Pipeline Friendly: There are zero branches (if statements) or expensive arithmetic operations (like division or modulo). The CPU can execute these bit shifts simultaneously via instruction-level parallelism.
+Would you like to analyze the assembly output to see how vector registers handle these shifts, or do you want to explore the newer xoshiro256** or xoshiro128** variants that succeeded the original Xorshift family?
+
