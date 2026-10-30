@@ -53,9 +53,12 @@ enum Res_Mask : uint8_t{
 
 #define LOCAL_BUF_MAX_CNT 20ULL 
 #define LOCAL_BUF_SZ (LOCAL_BUF_MAX_CNT * 128ULL) 
+
+
 #define MASK_4KB (0xFFFULL)
 #define MASK_63BIT_L (0x8000000000000000ULL)
-#define MASK_63BIT (~MASK_63BIT_L) 
+#define MASK_63BIT (~MASK_63BIT_L)
+#define MASK_QUEUE_NO (QUEUE_NO - 1ULL)
 /* Struct Defintions */ 
 
 struct mpsc_queue{
@@ -65,11 +68,13 @@ struct mpsc_queue{
 	 */ 
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_head_  ;
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_commit_head_  ;
+	uint8_t m_mask_head ;
 
 	/* tail is consume and gooubled up by the consumer*/
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_tail_ ;
 
 	alignas(HD_DESTRUCTIVE_INF_SZ) _Atomic(uint64_t) m_commit_tail_ ;
+	uint8_t m_mask_tail ;
 };
 
 /* This saves calle saved non volatile registers for the x86 Architecture and the OS ABI function rdi needed for the first argumnent  */
@@ -273,11 +278,19 @@ __attribute__((noinline)) int __fiber__flush_and_get_local_queue_synchronization
 int fiber_client_flush(struct fiber_client_local* client ){
 	auto count = client->m_internal_buf_cnt;
 	auto rand_id /* we get a random victim selector to distrubute the data*/= xorshift() % NO_OF_HARVESTERS;
-	struct fiber_data* queue_buf = (struct fiber_data*)client->m_addr[rand_id] ;
 	struct mpsc_queue* queue_info_ptr = client->mqueue_info[rand_id];
+	auto mask_cons = queue_info_ptr[rand_id].m_mask_tail; 
+	auto cons_real  = queue_info_ptr[rand_id].m_tail_;
+	struct fiber_data* queue_buf = (struct fiber_data*)client->m_addr[rand_id] ;
 	auto pos_ = atomic_fetch_add_explicit(&(queue_info_ptr[rand_id].m_head_) ,count , memory_order_release);
+	uint64_t res ;
+	bool overflow = __builtin_uaddl_overflow(pos_ , count , &res);
+	pos_ = pos_ & MASK_QUEUE_NO ;
 	// handle edge case if size is greater than buffer space left
-	memcpy((void*)&(queue_buf[pos_]) , (void*)(client->m_local_copy_buf) , sizeof(struct fiber_data) );
+	if((pos_ + count) >= QUEUE_NO){
+		
+	}
+	memcpy((void*)&(queue_buf[pos_]) , (void*)(client->m_local_copy_buf) , sizeof(struct fiber_data) * count );
 	atomic_fetch_add_explicit(&(queue_info_ptr[rand_id].m_commit_head_) ,count , memory_order_release);
 	client->m_internal_buf_cnt = 0 ;
 	return 0;
